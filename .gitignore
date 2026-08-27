@@ -1,0 +1,15 @@
+.DS_Store
+.build/
+DerivedData/
+.swiftpm/
+*.xcuserstate
+xcuserdata/
+*.mobileprovision
+*.p12
+*.cer
+*.pem
+.env*
+/Config/Signing.xcconfig
+
+# The website is maintained in its own repository.
+Website/

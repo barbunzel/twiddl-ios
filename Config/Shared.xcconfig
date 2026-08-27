@@ -1,0 +1,3 @@
+// Shared, non-sensitive target settings.
+// Local signing values are optional so simulator builds work after cloning.
+#include? "Signing.xcconfig"
