@@ -48,6 +48,7 @@ public struct PitchAcquisitionGate: Sendable {
 /// Smooths normal pitch movement without making a new string feel sluggish.
 /// Frequencies are filtered in log space so the response is even in cents.
 public struct PitchSmoother: Sendable {
+    private static let directFreshAcquisitionMinimumFrequency = 70.0
     private var filteredLogFrequency: Double?
     private var pendingLargeJump: Double?
     private var pendingLargeJumpCount = 0
@@ -116,6 +117,42 @@ public struct PitchSmoother: Sendable {
         filteredLogFrequency = nil
         pendingLargeJump = nil
         pendingLargeJumpCount = 0
+    }
+
+    /// A new guitar-range pitch that already passed the acquisition gate can
+    /// replace hidden pitch memory immediately. Very-low estimates retain the
+    /// normal outlier protection because captured room energy often appears as
+    /// stable, high-confidence sub-bass.
+    public mutating func prepareForFreshAcquisition(frequency: Double) {
+        if frequency >= Self.directFreshAcquisitionMinimumFrequency {
+            reset()
+        }
+    }
+
+    /// A visible note transition has already survived the tracker's
+    /// consistency gate, so a second large-jump delay would be redundant.
+    /// Accept ordinary string-to-string movement immediately, while keeping
+    /// the established pitch for exact harmonic relationships that can be
+    /// caused by octave or subharmonic detector errors.
+    public mutating func prepareForConfirmedTransition(frequency: Double) {
+        guard frequency >= Self.directFreshAcquisitionMinimumFrequency,
+              frequency.isFinite,
+              let filteredLogFrequency else { return }
+
+        let candidateLogFrequency = log2(frequency)
+        let ratio = pow(2, abs(candidateLogFrequency - filteredLogFrequency))
+        let harmonic = ratio.rounded()
+        let isHarmonicRelationship: Bool
+        if harmonic >= 2, harmonic <= 4 {
+            let errorInCents = 1_200 * log2(ratio / harmonic)
+            isHarmonicRelationship = abs(errorInCents) <= 55
+        } else {
+            isHarmonicRelationship = false
+        }
+
+        if !isHarmonicRelationship {
+            reset()
+        }
     }
 
     /// YIN can prefer a two-, three-, or four-period lag late in a quiet

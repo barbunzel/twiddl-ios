@@ -115,7 +115,7 @@ final class AudioPitchTracker: ObservableObject {
 
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
+            try session.setCategory(.record, mode: .default, options: [.allowBluetoothHFP])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
 
             let input = engine.inputNode
@@ -281,6 +281,8 @@ final class AudioPitchTracker: ObservableObject {
         }
 
         let acceptedEstimate: PitchEstimate
+        let acceptedFreshAcquisition: Bool
+        let acceptedConfirmedTransition: Bool
         if reading == nil {
             guard canAcquire(estimate) else {
                 acquisitionGate.reset()
@@ -288,6 +290,8 @@ final class AudioPitchTracker: ObservableObject {
             }
             guard let acquired = acquisitionGate.process(estimate) else { return }
             acceptedEstimate = acquired
+            acceptedFreshAcquisition = true
+            acceptedConfirmedTransition = false
         } else if let currentFrequency = reading?.frequency,
                   abs(1_200 * log2(estimate.frequency / currentFrequency)) > 350 {
             // An unrelated note must persist briefly before replacing the note
@@ -296,13 +300,30 @@ final class AudioPitchTracker: ObservableObject {
             guard canAcquire(estimate),
                   let transitioned = transitionGate.process(estimate) else { return }
             acceptedEstimate = transitioned
+            acceptedFreshAcquisition = false
+            acceptedConfirmedTransition = true
         } else {
             acquisitionGate.reset()
             transitionGate.reset()
             acceptedEstimate = estimate
+            acceptedFreshAcquisition = false
+            acceptedConfirmedTransition = false
         }
 
         lastDetection = Date()
+        // A fresh acquisition has already passed the consistency gate. Do not
+        // let the smoother resurrect a previous note that is no longer visible.
+        // Visible-note transitions keep the smoother's extra protection from
+        // exact /2, /3, and /4 decay aliases.
+        if acceptedFreshAcquisition {
+            smoother.prepareForFreshAcquisition(
+                frequency: acceptedEstimate.frequency
+            )
+        } else if acceptedConfirmedTransition {
+            smoother.prepareForConfirmedTransition(
+                frequency: acceptedEstimate.frequency
+            )
+        }
         let stabilizedFrequency = smoother.process(
             frequency: acceptedEstimate.frequency,
             signalLevel: acceptedEstimate.signalLevel
